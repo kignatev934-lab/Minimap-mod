@@ -62,73 +62,44 @@ jobs:
         with:
           gradle-version: '9.8.1'
 
-      - name: Build
+      - name: Collect critical API information
         run: |
-          PROJ=$(dirname "$(find proj -name build.gradle | head -1)")
-          cd "$PROJ"
-          gradle build --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/build.log" || true
-
-      - name: Dump API
-        if: always()
-        run: |
-          cat > dump_api.sh <<'SCRIPT'
-          #!/bin/bash
           set +e
           mkdir -p dump
-          find /home/runner/.gradle/caches -name '*.jar' 2>/dev/null | grep -v sources > dump/all-jars.txt
-          FU=$(grep -i universal dump/all-jars.txt | head -1)
-          EB=$(grep -i eventbus dump/all-jars.txt | head -1)
-          echo "universal jar: $FU"
-          echo "eventbus jar:  $EB"
+          
+          # Находим нужные jar-файлы
+          FU=$(find /home/runner/.gradle/caches -name '*universal*.jar' 2>/dev/null | head -1)
+          EB=$(find /home/runner/.gradle/caches -name '*eventbus*.jar' 2>/dev/null | head -1)
+          
+          # Собираем информацию о ключевых классах
           if [ -n "$FU" ]; then
-            unzip -l "$FU" > dump/forge-listing.txt 2>/dev/null
-            grep 'net/minecraftforge/client/event' dump/forge-listing.txt | grep '\.class' | sort -u > dump/events-client.txt
-            wc -l dump/events-client.txt
-            echo "=== CLIENT EVENTS (all) ==="
-            cat dump/events-client.txt
-            echo "=== JAVAP FORGE ==="
-            for c in net.minecraftforge.client.event.InputEvent net.minecraftforge.client.event.InputEvent\$MouseButtonPressed net.minecraftforge.client.event.InputEvent\$MouseButtonReleased net.minecraftforge.client.event.InputEvent\$Key net.minecraftforge.client.event.RegisterKeyMappingsEvent net.minecraftforge.client.event.ClientTickEvent net.minecraftforge.event.TickEvent net.minecraftforge.client.extensions.IForgeGuiGraphicsExtractor; do
-              echo "--- $c" >> dump/javap.txt
-              javap -cp "$FU" "$c" >> dump/javap.txt 2>&1
-            done
-            cat dump/javap.txt
+            echo "Found Forge Universal JAR: $FU" >> dump/api-info.txt
+            javap -cp "$FU" net.minecraftforge.client.event.InputEvent >> dump/api-info.txt 2>&1
+            javap -cp "$FU" net.minecraftforge.client.extensions.IForgeGuiGraphicsExtractor >> dump/api-info.txt 2>&1
+            javap -cp "$FU" net.minecraftforge.client.event.RegisterKeyMappingsEvent >> dump/api-info.txt 2>&1
           fi
+          
           if [ -n "$EB" ]; then
-            echo "=== JAVAP EVENTBUS ==="
-            for c in net.minecraftforge.eventbus.api.listener.SubscribeEvent net.minecraftforge.eventbus.api.bus.EventBus net.minecraftforge.eventbus.api.event.MutableEvent; do
-              echo "--- $c" >> dump/eventbus.txt
-              javap -cp "$EB" "$c" >> dump/eventbus.txt 2>&1
-            done
-            cat dump/eventbus.txt
+            echo "Found EventBus JAR: $EB" >> dump/api-info.txt
+            javap -cp "$EB" net.minecraftforge.eventbus.api.listener.SubscribeEvent >> dump/api-info.txt 2>&1
+            javap -cp "$EB" net.minecraftforge.eventbus.api.bus.EventBus >> dump/api-info.txt 2>&1
           fi
+          
+          # Ищем исходники Minecraft
           SRC=$(find /home/runner/.gradle/caches -name '*javadoc*.jar' 2>/dev/null | head -1)
-          echo "sources jar: $SRC"
           if [ -n "$SRC" ]; then
-            unzip -l "$SRC" > dump/src-listing.txt 2>/dev/null
-            wc -l dump/src-listing.txtfor n in GuiGraphicsExtractor Screen KeyEvent MouseButtonEvent KeyMapping Minecraft InputConstants DynamicTexture NativeImage ChunkPos Font Gui RenderSystem PoseStack DeltaTracker Button EditBox Heightmap; do
-              echo "=== $n ===" >> dump/mc-sigs.txt
-              f=$(grep -E "/${n}\.java$" dump/src-listing.txt | head -1 | awk '{print $4}')
-              if [ -n "$f" ]; then
-                unzip -p "$SRC" "$f" 2>/dev/null | grep -E '(public|protected) ' | head -80 >> dump/mc-sigs.txt
-              else
-                echo "NOT FOUND" >> dump/mc-sigs.txt
-              fi
-            done
-            cat dump/mc-sigs.txt
+            echo "Found Sources JAR: $SRC" >> dump/api-info.txt
+            unzip -l "$SRC" | grep -E 'Screen|GuiGraphicsExtractor|KeyEvent|MouseButtonEvent' >> dump/api-info.txt
           fi
-          SCRIPT
-          bash dump_api.sh || true
 
       - name: Save API dump
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: api-dump
           path: dump
 
-      - name: Save full log
+      - name: Save build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: build.log
+          name: build-
