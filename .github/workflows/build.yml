@@ -12,14 +12,45 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Unzip project
-        run: |
-          unzip -o *.zip -d proj
+        run: unzip -o -q simpleminimap_project.zip -d proj
 
-      - name: Upgrade ForgeGradle to 7
+      - name: Write fixed build.gradle
         run: |
-          sed -i "s|id 'net.minecraftforge.gradle'.*|id 'net.minecraftforge.gradle' version '[7.0,)'|" proj/build.gradle
-          echo "=== Проверка замены ==="
-          head -6 proj/build.gradle
+          cat > proj/build.gradle <<'EOF'
+          plugins {
+              id 'java'
+              id 'net.minecraftforge.gradle' version '[7.0,)'
+          }
+
+          version = '1.5.0'
+          group = 'ru.example'
+
+          base {
+              archivesName = 'simpleminimap'
+          }
+
+          java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+          minecraft {
+              mappings channel: 'official', version: '26.3'
+
+              runs {
+                  client {
+                      workingDirectory project.file('run')
+                      property 'forge.logging.console.level', 'debug'
+                      mods { simpleminimap { source sourceSets.main } }
+                  }
+              }
+          }
+
+          dependencies {
+              minecraft "net.minecraftforge:forge:26.3-66.1.0"
+          }
+
+          tasks.withType(JavaCompile).configureEach {
+              options.encoding = 'UTF-8'
+          }
+          EOF
 
       - name: Install JDK 25
         uses: actions/setup-java@v4
