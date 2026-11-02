@@ -69,29 +69,46 @@ jobs:
           gradle build --no-daemon 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
-      - name: Dump API of 26.3
+      - name: Collect jar list
         if: always()
         run: |
-          {
-            echo "=== FORGE CLIENT EVENTS ==="
-            FU=$(find /home/runner/.gradle/caches/minecraftforge -name '*universal.jar' | head -1)
-            echo "jar: $FU"
-            unzip -l "$FU" 2>/dev/null | grep -oE "net/minecraftforge/client/event/[A-Za-z$]+\.class" | sort -u
-            echo ""
-            echo "=== FORGE event/ PACKAGE ==="
-            unzip -l "$FU" 2>/dev/null | grep -oE "net/minecraftforge/event/[A-Za-z$/.]+\.class" | sort -u | head -60
-            echo ""
-            echo "=== JAVAP FORGE EVENTS ==="
-            for c in net.minecraftforge.client.event.RegisterGuiLayersEvent net.minecraftforge.client.event.RegisterKeyMappingsEvent net.minecraftforge.client.event.RenderLevelStageEvent net.minecraftforge.client.event.RenderGuiEvent net.minecraftforge.client.event.RenderGuiLayerEvent net.minecraftforge.event.TickEvent net.minecraftforge.client.event.ClientTickEvent 'net.minecraftforge.client.event.InputEvent$MouseButtonPressed' net.minecraftforge.client.extensions.IForgeGuiGraphicsExtractor; do
-              echo "--- $c"
-              javap -cp "$FU" "$c" 2>&1 | head -30
-            done
-            echo ""
-            echo "=== MC SOURCES SIGNATURES ==="
-            SRC=$(find /home/runner/.gradle/caches/minecraftforge -name 'remapped-javadoc.jar' | head -1)
-            echo "sources: $SRC"
-            rm -rf srcs && mkdir -p srcs
-            (cd srcs && unzip -o -q "$SRC" 2>/dev/null)
-            for f in com/mojang/blaze3d/platform/InputConstants.java net/minecraft/client/gui/GuiGraphicsExtractor.java net/minecraft/client/gui/screens/Screen.java net/minecraft/client/input/KeyEvent.java net/minecraft/client/input/MouseButtonEvent.java net/minecraft/client/KeyMapping.java net/minecraft/client/Minecraft.java net/minecraft/client/gui/components/Button.java net/minecraft/client/gui/components/EditBox.java net/minecraft/client/renderer/texture/DynamicTexture.java com/mojang/blaze3d/platform/NativeImage.java net/minecraft/world/level/levelgen/Heightmap.java net/minecraft/world/level/ChunkPos.java net/minecraft/client/gui/Font.java net/minecraft/client/gui/Gui.java; do
-              echo "--- FILE $f"
-              if [ -f "srcs/$f" ]; then
+          mkdir -p dump
+          find /home/runner/.gradle/caches -name '*.jar' 2>/dev/null > dump/all-jars.txt
+          grep -iE 'universal|forge' dump/all-jars.txt > dump/forge-jars.txt || true
+          grep -i 'lwjgl' dump/all-jars.txt > dump/lwjgl-jars.txt || true
+          wc -l dump/all-jars.txt dump/forge-jars.txt dump/lwjgl-jars.txt
+          cat dump/lwjgl-jars.txt
+
+      - name: List Forge events
+        if: always()
+        run: |
+          FU=$(grep -i universal dump/forge-jars.txt | head -1)
+          echo "jar: $FU"
+          if [ -n "$FU" ]; then unzip -l "$FU" > dump/forge-listing.txt; fi
+          grep -E 'eventbus|minecraftforge/event' dump/forge-listing.txt 2>/dev/null | grep '\.class' | sort -u | head -300 > dump/forge-events.txt || true
+          wc -l dump/forge-events.txt || true
+          head -120 dump/forge-events.txt
+
+      - name: Javap key Forge classes
+        if: always()
+        run: |
+          FU=$(grep -i universal dump/forge-jars.txt | head -1)
+          echo "jar: $FU"
+          javap -cp "$FU" net.minecraftforge.eventbus.api.listener.SubscribeEvent > dump/javap.txt 2>&1 || true
+          javap -cp "$FU" net.minecraftforge.eventbus.api.IEventBus >> dump/javap.txt 2>&1 || true
+          javap -cp "$FU" net.minecraftforge.client.event.RegisterGuiLayersEvent >> dump/javap.txt 2>&1 || true
+          javap -cp "$FU" net.minecraftforge.client.event.RegisterKeyMappingsEvent >> dump/javap.txt 2>&1 || true
+          javap -cp "$FU" net.minecraftforge.client.event.RenderGuiEvent >> dump/javap.txt 2>&1 || true
+          javap -cp "$FU" net.minecraftforge.client.event.RenderGuiLayerEvent >> dump/javap.txt 2>&1 || true
+          javap -cp "$FU" net.minecraftforge.client.extensions.IForgeGuiGraphicsExtractor >> dump/javap.txt 2>&1 || true
+          javap -cp "$FU" net.minecraftforge.client.event.InputEvent >> dump/javap.txt 2>&1 || true
+          cat dump/javap.txt
+
+      - name: Extract MC sources
+        if: always()
+        run: |
+          SRC=$(grep -i 'javadoc' dump/all-jars.txt | grep -iv 'universal' | head -1)
+          echo "sources jar: $SRC"
+          if [ -n "$SRC" ]; then
+            mkdir -p dump/srcs
+            (cd dump/srcs && unzip -o -q "$SRC") || true
