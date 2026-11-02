@@ -33,8 +33,6 @@ jobs:
 
           minecraft {
               mappings channel: 'official', version: '26.3'
-              forceReload = true
-              cacheOnly = false
           }
 
           repositories {
@@ -64,23 +62,108 @@ jobs:
         with:
           gradle-version: '9.8.1'
 
-      - name: Clean Gradle cache
-        run: |
-          rm -rf ~/.gradle/caches
-          rm -rf ~/.gradle/wrapper
-
-      - name: Check dependencies
+      - name: Build
         run: |
           PROJ=$(dirname "$(find proj -name build.gradle | head -1)")
           cd "$PROJ"
-          gradle dependencies --configuration compileClasspath
+          gradle build --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/build.log" || true
+          touch "$GITHUB_WORKSPACE/build.log"
 
-      - name: List downloaded jars
+      - name: Dump API
+        if: always()
         run: |
-          find /home/runner/.gradle/caches -name '*.jar' | grep forge
+          cat > dump_api.sh <<'SCRIPT'
+          #!/bin/bash
+          set +e
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p dump
+          find /home/runner/.gradle/caches -name '*.jar' 2>/dev/null > dump/all-jars.txt
+          FU=$(grep -i universal dump/all-jars.txt | head -1)
+          EB=$(grep -i eventbus dump/all-jars.txt | head -1)
+          SRC=$(grep -iE 'javadoc|sources' dump/all-jars.txt | grep -vi universal | head -1)
+          echo "universal jar: ${FU:-NOT FOUND}"
+          echo "eventbus jar:  ${EB:-NOT FOUND}"
+          echo "sources jar:   ${SRC:-NOT FOUND}"
+          if [ -n "$FU" ]; then
+            unzip -l "$FU" > dump/forge-listing.txt 2>/dev/null
+            echo "=== CLIENT EVENTS ==="
+            grep 'net/minecraftforge/client/event' dump/forge-listing.txt | grep '\.class' | sort -u
+            echo "=== RENDER-RELATED IN FORGE ==="
+            grep -iE 'renderlevel|renderpipeline|guilayer|guioverlay' dump/forge-listing.txt | grep '\.class' | sort -u | head -40
+            echo "=== JAVAP FORGE ==="
+            for c in net.minecraftforge.client.event.CustomizeGuiOverlayEvent net.minecraftforge.client.event.AddGuiOverlayLayersEvent net.minecraftforge.client.event.InputEvent\$MouseButton\$Post net.minecraftforge.client.event.InputEvent\$Key net.minecraftforge.client.event.ScreenEvent\$Render net.minecraftforge.client.event.ScreenEvent\$KeyPressed net.minecraftforge.client.event.RegisterKeyMappingsEvent net.minecraftforge.client.event.RegisterGuiLayersEvent net.minecraftforge.client.extensions.IForgeGuiGraphicsExtractor net.minecraftforge.fml.common.Mod; do
+              echo "--- $c"
+              javap -cp "$FU" "$c" 2>&1 | head -30
+            done
+          fi
+          if [ -n "$EB" ]; then
+            echo "=== JAVAP EVENTBUS ==="
+            for c in net.minecraftforge.eventbus.api.listener.SubscribeEvent net.minecraftforge.eventbus.api.bus.EventBus net.minecraftforge.eventbus.api.event.MutableEvent; do
+              echo "--- $c"
+              javap -cp "$EB" "$c" 2>&1 | head -25
+            done
+          fi
+          if [ -n "$SRC" ]; then
+            unzip -l "$SRC" > dump/src-listing.txt 2>/dev/null
+            wc -l dump/src-listing.txtcat > dump/names.txt <<'NAMES'
+          GuiGraphicsExtractor
+          Screen
+          KeyEvent
+          MouseButtonEvent
+          KeyMapping
+          Minecraft
+          InputConstants
+          DynamicTexture
+          NativeImage
+          ChunkPos
+          Font
+          Gui
+          RenderSystem
+          PoseStack
+          DeltaTracker
+          Button
+          EditBox
+          Heightmap
+          Tesselator
+          BufferUploader
+          BufferBuilder
+          VertexFormat
+          RenderType
+          RenderPipeline
+          RenderPipelines
+          MultiBufferSource
+          ClientLevel
+          Level
+          Player
+          ResourceLocation
+          NAMES
+            while read -r n; do
+              echo "=== $n ===" >> dump/mc-sigs.txt
+              line=$(grep -E "/${n}\.java$" dump/src-listing.txt | head -1 | awk '{print $4}')
+              if [ -n "$line" ]; then
+                unzip -p "$SRC" "$line" 2>/dev/null | grep -E '(public|protected) ' | head -70 >> dump/mc-sigs.txt
+              else
+                echo "NOT FOUND" >> dump/mc-sigs.txt
+              fi
+            done < dump/names.txt
+            echo "=== MC SIGNATURES ==="
+            cat dump/mc-sigs.txt
+          fi
+          SCRIPT
+          bash dump_api.sh || true
 
-      - name: Save dependencies list
+      - name: Save API dump
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dependencies
-          path: /home/runner/.gradle/caches
+          name: api-dump
+          path: dump
+          if-no-files-found: warn
+
+      - name: Save build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
