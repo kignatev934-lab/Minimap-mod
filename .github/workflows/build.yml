@@ -69,16 +69,44 @@ jobs:
           gradle build --no-daemon 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
+      - name: Scan API of 26.3
+        if: always()
+        run: |
+          {
+            echo "=== RESOLVED CLASSPATH ==="
+            PROJ=$(dirname "$(find proj -name build.gradle | head -1)")
+            (cd "$PROJ" && gradle -q dependencies --configuration compileClasspath 2>&1 | head -150)
+            echo ""
+            echo "=== JARS FOUND ==="
+            find /home/runner -name '*.jar' ! -name '*sources*' 2>/dev/null | head -60
+            echo ""
+            echo "=== CLASSES WE NEED, PER JAR ==="
+            for j in $(find /home/runner -name '*.jar' ! -name '*sources*' 2>/dev/null); do
+              out=$(unzip -l "$j" 2>/dev/null | grep -E "(eventbus|RenderLevelStage|RegisterGuiLayers|BufferUploader|Tesselator|GuiGraphics|InputConstants|ChunkPos|ClientTickEvent|KeyMapping|DynamicTexture|NativeImage|input/KeyEvent|input/MouseButtonEvent|RenderPipeline)" | head -30)
+              if [ -n "$out" ]; then
+                echo "--- $j"
+                echo "$out"
+              fi
+            done
+            echo ""
+            echo "=== EVENTBUS VERSIONS ON FORGE MAVEN ==="
+            curl -s "https://maven.minecraftforge.net/net/minecraftforge/eventbus/maven-metadata.xml" | tail -25
+            echo ""
+            echo "=== LWJGL-GLFW VERSIONS ON MAVEN CENTRAL ==="
+            curl -s "https://repo1.maven.org/maven2/org/lwjgl/lwjgl-glfw/maven-metadata.xml" | tail -8
+          } > scan.txt 2>&1
+          cat scan.txt
+
+      - name: Save API scan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-scan
+          path: scan.txt
+
       - name: Save full log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build.log
-
-      - name: Upload jar
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: floppymap
-          path: "**/build/libs/*.jar"
