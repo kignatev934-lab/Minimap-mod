@@ -62,102 +62,18 @@ jobs:
         with:
           gradle-version: '9.8.1'
 
-      - name: Build
+      - name: Check dependencies
         run: |
           PROJ=$(dirname "$(find proj -name build.gradle | head -1)")
           cd "$PROJ"
-          gradle build --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/build.log" || true
+          gradle dependencies --configuration compileClasspath
 
-      - name: Dump API
-        if: always()
+      - name: List downloaded jars
         run: |
-          cat > dump_api.sh <<'SCRIPT'
-          #!/bin/bash
-          set +e
-          mkdir -p dump
-          find /home/runner/.gradle/caches -name '*.jar' 2>/dev/null | grep -v sources > dump/all-jars.txt
-          FU=$(grep -i universal dump/all-jars.txt | head -1)
-          EB=$(grep -i eventbus dump/all-jars.txt | head -1)
-          SRC=$(find /home/runner/.gradle/caches -name '*javadoc*.jar' 2>/dev/null | head -1)
-          echo "universal jar: $FU"
-          echo "eventbus jar:  $EB"
-          echo "sources jar:   $SRC"
-          if [ -n "$FU" ]; then
-            unzip -l "$FU" > dump/forge-listing.txt 2>/dev/null
-            echo "=== FML CORE CLASSES ==="
-            grep 'net/minecraftforge/fml/' dump/forge-listing.txt | grep '\.class' | head -40
-            echo "=== JAVAP FORGE EVENTS ==="
-            for c in net.minecraftforge.client.event.CustomizeGuiOverlayEvent net.minecraftforge.client.event.AddGuiOverlayLayersEvent net.minecraftforge.client.event.InputEvent\$MouseButton\$Post net.minecraftforge.client.event.ScreenEvent\$Render net.minecraftforge.eventbus.api.listener.SubscribeEvent; do
-              echo "--- $c"
-              javap -cp "$FU" "$c" 2>&1 | head -30
-            done
-            echo "=== JAVAP FML ==="
-            for c in net.minecraftforge.fml.common.Mod net.minecraftforge.fml.ModContainer net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent; do
-              echo "--- $c"
-              javap -cp "$FU" "$c" 2>&1 | head -30
-            done
-          fi
-          if [ -n "$SRC" ]; then
-            unzip -l "$SRC" > dump/src-listing.txt 2>/dev/null
-            wc -l dump/src-listing.txt
-            cat > dump/names.txt <<'NAMES'
-          GuiGraphicsExtractor
-          Screen
-          KeyEvent
-          MouseButtonEvent
-          KeyMapping
-          Minecraft
-          InputConstants
-          DynamicTexture
-          NativeImage
-          ChunkPos
-          Font
-          Gui
-          RenderSystem
-          PoseStack
-          DeltaTracker
-          Button
-          EditBox
-          Heightmap
-          Tesselator
-          BufferUploader
-          BufferBuilder
-          VertexFormat
-          RenderType
-          RenderPipeline
-          RenderPipelinesVertexConsumerProvider
-          MultiBufferSource
-          ResourceLocation
-          ClientLevel
-          Level
-          Player
-          BlockPos
-          ResourceLocationPattern
-          NAMES
-            while read -r n; do
-              echo "=== $n ===" >> dump/mc-sigs.txt
-              line=$(grep -E "/${n}\.java$" dump/src-listing.txt | head -1 | awk '{print $4}')
-              if [ -n "$line" ]; then
-                unzip -p "$SRC" "$line" 2>/dev/null | grep -E '(public|protected) ' | head -70 >> dump/mc-sigs.txt
-              else
-                echo "NOT FOUND" >> dump/mc-sigs.txt
-              fi
-            done < dump/names.txt
-            cat dump/mc-sigs.txt
-          fi
-          SCRIPT
-          bash dump_api.sh || true
+          find /home/runner/.gradle/caches -name '*.jar' | grep forge
 
-      - name: Save API dump
-        if: always()
+      - name: Save dependencies list
         uses: actions/upload-artifact@v4
         with:
-          name: api-dump
-          path: dump
-
-      - name: Save build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
+          name: dependencies
+          path: /home/runner/.gradle/caches
