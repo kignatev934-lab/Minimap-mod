@@ -36,7 +36,10 @@ jobs:
           }
 
           repositories {
-              maven { url = 'https://maven.minecraftforge.net' }
+              minecraft.mavenizer(it)
+              maven fg.forgeMaven
+              maven fg.minecraftLibsMaven
+              mavenCentral()
           }
 
           dependencies {
