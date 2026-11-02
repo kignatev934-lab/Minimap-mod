@@ -33,6 +33,8 @@ jobs:
 
           minecraft {
               mappings channel: 'official', version: '26.3'
+              forceReload = true
+              cacheOnly = false
           }
 
           repositories {
@@ -62,53 +64,41 @@ jobs:
         with:
           gradle-version: '9.8.1'
 
-      - name: Build
+      - name: Collect API information
         run: |
           PROJ=$(dirname "$(find proj -name build.gradle | head -1)")
           cd "$PROJ"
-          gradle build --no-daemon 2>&1 | tee build.log
-          exit ${PIPESTATUS[0]}
-
-      - name: Collect jar list
-        if: always()
-        run: |
+          
+          # Собираем информацию о классах
           mkdir -p dump
-          find /home/runner/.gradle/caches -name '*.jar' 2>/dev/null > dump/all-jars.txt
-          grep -iE 'universal|forge' dump/all-jars.txt > dump/forge-jars.txt || true
-          grep -i 'lwjgl' dump/all-jars.txt > dump/lwjgl-jars.txt || true
-          wc -l dump/all-jars.txt dump/forge-jars.txt dump/lwjgl-jars.txt
-          cat dump/lwjgl-jars.txt
+          
+          # Список всех jar-файлов
+          find /home/runner/.gradle/caches -name '*.jar' > dump/all-jars.txt
+          
+          # Извлекаем список классов
+          for jar in $(grep -i universal dump/all-jars.txt); do
+            unzip -l "$jar" >> dump/classes.txt
+          done
+          
+          # Ищем ключевые классы
+          grep -E 'eventbus|minecraftforge/event' dump/classes.txt | grep '.class' > dump/events.txt
+          
+          # Сохраняем информацию о версиях
+          echo "ForgeGradle version: $(gradle -q forgegradle.version)" > dump/versions.txt
+          
+          # Собираем сигнатуры ключевых классов
+          javap -cp "$(find /home/runner/.gradle/caches -name '*universal*.jar')" net.minecraftforge.eventbus.api.listener.SubscribeEvent > dump/javap.txt 2>&1
+          javap -cp "$(find /home/runner/.gradle/caches -name '*universal*.jar')" net.minecraftforge.client.event.RegisterGuiLayersEvent >> dump/javap.txt 2>&1
+          
+      - name: Save API dump
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-dump
+          path: dump
 
-      - name: List Forge events
+      - name: Save build log
         if: always()
-        run: |
-          FU=$(grep -i universal dump/forge-jars.txt | head -1)
-          echo "jar: $FU"
-          if [ -n "$FU" ]; then unzip -l "$FU" > dump/forge-listing.txt; fi
-          grep -E 'eventbus|minecraftforge/event' dump/forge-listing.txt 2>/dev/null | grep '\.class' | sort -u | head -300 > dump/forge-events.txt || true
-          wc -l dump/forge-events.txt || true
-          head -120 dump/forge-events.txt
-
-      - name: Javap key Forge classes
-        if: always()
-        run: |
-          FU=$(grep -i universal dump/forge-jars.txt | head -1)
-          echo "jar: $FU"
-          javap -cp "$FU" net.minecraftforge.eventbus.api.listener.SubscribeEvent > dump/javap.txt 2>&1 || true
-          javap -cp "$FU" net.minecraftforge.eventbus.api.IEventBus >> dump/javap.txt 2>&1 || true
-          javap -cp "$FU" net.minecraftforge.client.event.RegisterGuiLayersEvent >> dump/javap.txt 2>&1 || true
-          javap -cp "$FU" net.minecraftforge.client.event.RegisterKeyMappingsEvent >> dump/javap.txt 2>&1 || true
-          javap -cp "$FU" net.minecraftforge.client.event.RenderGuiEvent >> dump/javap.txt 2>&1 || true
-          javap -cp "$FU" net.minecraftforge.client.event.RenderGuiLayerEvent >> dump/javap.txt 2>&1 || true
-          javap -cp "$FU" net.minecraftforge.client.extensions.IForgeGuiGraphicsExtractor >> dump/javap.txt 2>&1 || true
-          javap -cp "$FU" net.minecraftforge.client.event.InputEvent >> dump/javap.txt 2>&1 || true
-          cat dump/javap.txt
-
-      - name: Extract MC sources
-        if: always()
-        run: |
-          SRC=$(grep -i 'javadoc' dump/all-jars.txt | grep -iv 'universal' | head -1)
-          echo "sources jar: $SRC"
-          if [ -n "$SRC" ]; then
-            mkdir -p dump/srcs
-            (cd dump/srcs && unzip -o -q "$SRC") || true
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
