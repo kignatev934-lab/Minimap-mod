@@ -15,9 +15,11 @@ jobs:
         run: |
           unzip -o *.zip -d proj
 
-      - name: Fix build.gradle
+      - name: Upgrade ForgeGradle to 7
         run: |
-          sed -i "s|plugins {.*|plugins {\n    id 'java'\n    id 'net.minecraftforge.gradle' version '[7.0,)'|g" proj/build.gradle
+          sed -i "s|id 'net.minecraftforge.gradle'.*|id 'net.minecraftforge.gradle' version '[7.0,)'|" proj/build.gradle
+          echo "=== Проверка замены ==="
+          head -6 proj/build.gradle
 
       - name: Install JDK 25
         uses: actions/setup-java@v4
@@ -34,9 +36,18 @@ jobs:
         run: |
           PROJ=$(dirname "$(find proj -name build.gradle | head -1)")
           cd "$PROJ"
-          gradle build --no-daemon
+          gradle build --no-daemon 2>&1 | tee build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Save full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Upload jar
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: floppymap
