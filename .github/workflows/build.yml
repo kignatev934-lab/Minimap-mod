@@ -69,44 +69,29 @@ jobs:
           gradle build --no-daemon 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
-      - name: Scan API of 26.3
+      - name: Dump API of 26.3
         if: always()
         run: |
           {
-            echo "=== RESOLVED CLASSPATH ==="
-            PROJ=$(dirname "$(find proj -name build.gradle | head -1)")
-            (cd "$PROJ" && gradle -q dependencies --configuration compileClasspath 2>&1 | head -150)
+            echo "=== FORGE CLIENT EVENTS ==="
+            FU=$(find /home/runner/.gradle/caches/minecraftforge -name '*universal.jar' | head -1)
+            echo "jar: $FU"
+            unzip -l "$FU" 2>/dev/null | grep -oE "net/minecraftforge/client/event/[A-Za-z$]+\.class" | sort -u
             echo ""
-            echo "=== JARS FOUND ==="
-            find /home/runner -name '*.jar' ! -name '*sources*' 2>/dev/null | head -60
+            echo "=== FORGE event/ PACKAGE ==="
+            unzip -l "$FU" 2>/dev/null | grep -oE "net/minecraftforge/event/[A-Za-z$/.]+\.class" | sort -u | head -60
             echo ""
-            echo "=== CLASSES WE NEED, PER JAR ==="
-            for j in $(find /home/runner -name '*.jar' ! -name '*sources*' 2>/dev/null); do
-              out=$(unzip -l "$j" 2>/dev/null | grep -E "(eventbus|RenderLevelStage|RegisterGuiLayers|BufferUploader|Tesselator|GuiGraphics|InputConstants|ChunkPos|ClientTickEvent|KeyMapping|DynamicTexture|NativeImage|input/KeyEvent|input/MouseButtonEvent|RenderPipeline)" | head -30)
-              if [ -n "$out" ]; then
-                echo "--- $j"
-                echo "$out"
-              fi
+            echo "=== JAVAP FORGE EVENTS ==="
+            for c in net.minecraftforge.client.event.RegisterGuiLayersEvent net.minecraftforge.client.event.RegisterKeyMappingsEvent net.minecraftforge.client.event.RenderLevelStageEvent net.minecraftforge.client.event.RenderGuiEvent net.minecraftforge.client.event.RenderGuiLayerEvent net.minecraftforge.event.TickEvent net.minecraftforge.client.event.ClientTickEvent 'net.minecraftforge.client.event.InputEvent$MouseButtonPressed' net.minecraftforge.client.extensions.IForgeGuiGraphicsExtractor; do
+              echo "--- $c"
+              javap -cp "$FU" "$c" 2>&1 | head -30
             done
             echo ""
-            echo "=== EVENTBUS VERSIONS ON FORGE MAVEN ==="
-            curl -s "https://maven.minecraftforge.net/net/minecraftforge/eventbus/maven-metadata.xml" | tail -25
-            echo ""
-            echo "=== LWJGL-GLFW VERSIONS ON MAVEN CENTRAL ==="
-            curl -s "https://repo1.maven.org/maven2/org/lwjgl/lwjgl-glfw/maven-metadata.xml" | tail -8
-          } > scan.txt 2>&1
-          cat scan.txt
-
-      - name: Save API scan
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-scan
-          path: scan.txt
-
-      - name: Save full log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
+            echo "=== MC SOURCES SIGNATURES ==="
+            SRC=$(find /home/runner/.gradle/caches/minecraftforge -name 'remapped-javadoc.jar' | head -1)
+            echo "sources: $SRC"
+            rm -rf srcs && mkdir -p srcs
+            (cd srcs && unzip -o -q "$SRC" 2>/dev/null)
+            for f in com/mojang/blaze3d/platform/InputConstants.java net/minecraft/client/gui/GuiGraphicsExtractor.java net/minecraft/client/gui/screens/Screen.java net/minecraft/client/input/KeyEvent.java net/minecraft/client/input/MouseButtonEvent.java net/minecraft/client/KeyMapping.java net/minecraft/client/Minecraft.java net/minecraft/client/gui/components/Button.java net/minecraft/client/gui/components/EditBox.java net/minecraft/client/renderer/texture/DynamicTexture.java com/mojang/blaze3d/platform/NativeImage.java net/minecraft/world/level/levelgen/Heightmap.java net/minecraft/world/level/ChunkPos.java net/minecraft/client/gui/Font.java net/minecraft/client/gui/Gui.java; do
+              echo "--- FILE $f"
+              if [ -f "srcs/$f" ]; then
