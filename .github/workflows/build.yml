@@ -33,6 +33,8 @@ jobs:
 
           minecraft {
               mappings channel: 'official', version: '26.3'
+              forceReload = true
+              cacheOnly = false
           }
 
           repositories {
@@ -61,6 +63,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.8.1'
+
+      - name: Clean Gradle cache
+        run: |
+          rm -rf ~/.gradle/caches
+          rm -rf ~/.gradle/wrapper
 
       - name: Check dependencies
         run: |
